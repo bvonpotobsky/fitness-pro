@@ -1,0 +1,421 @@
+generator client {
+    provider = "prisma-client-js"
+}
+
+datasource db {
+    provider = "mysql"
+    url      = env("DATABASE_URL")
+}
+
+/**
+ * ===========================
+ * AUTH MODELS (Better-auth)
+ * ===========================
+ */
+
+model User {
+    id            String    @id @default(cuid())
+    name          String?
+    email         String?   @unique
+    emailVerified Boolean   @default(false)
+    image         String?
+    createdAt     DateTime  @default(now())
+    updatedAt     DateTime  @updatedAt
+    accounts      Account[]
+    sessions      Session[]
+
+    // Perfil extendido
+    coach  Coach?
+    client Client?
+}
+
+model Session {
+    id        String   @id @default(cuid())
+    token     String   @unique
+    userId    String
+    expiresAt DateTime
+    ipAddress String?
+    userAgent String?
+    createdAt DateTime @default(now())
+    updatedAt DateTime @updatedAt
+    user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Account {
+    id                    String    @id @default(cuid())
+    userId                String
+    accountId             String
+    providerId            String
+    accessToken           String?   @db.Text
+    refreshToken          String?   @db.Text
+    idToken               String?   @db.Text
+    accessTokenExpiresAt  DateTime?
+    refreshTokenExpiresAt DateTime?
+    scope                 String?
+    password              String?
+    createdAt             DateTime  @default(now())
+    updatedAt             DateTime  @updatedAt
+    user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+    @@unique([providerId, accountId])
+}
+
+model Verification {
+    id         String   @id @default(cuid())
+    identifier String
+    value      String   @db.Text
+    expiresAt  DateTime
+    createdAt  DateTime @default(now())
+    updatedAt  DateTime @updatedAt
+
+    @@unique([identifier, value(length: 255)])
+}
+
+/**
+ * ===========================
+ * ROLES / PROFILES
+ * ===========================
+ */
+
+model Coach {
+    userId         String  @id
+    bio            String?
+    certifications String?
+    settingsJson   Json?
+    user           User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+    plans            Plan[]
+    templates        PlanTemplate[]
+    progressionTypes ProgressionType[]
+    Section          Section[]
+}
+
+model Client {
+    userId String  @id
+    docId  String?
+    notes  String?
+    user   User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+    plans Plan[]
+}
+
+/**
+ * ===========================
+ * CATALOGS
+ * ===========================
+ */
+
+model Section {
+    id               Int     @id @default(autoincrement())
+    name             String
+    description      String?
+    isGlobalTemplate Boolean @default(true)
+    coach            Coach?  @relation(fields: [coachId], references: [userId])
+    coachId          String?
+
+    planDaySections     PlanDaySection[]
+    templateDaySections TemplateDaySection[]
+}
+
+model Exercise {
+    id            Int     @id @default(autoincrement())
+    name          String  @unique
+    alias         String?
+    description   String?
+    groupMuscular String?
+    pattern       String?
+    equipment     String?
+    mmAxis        MmAxis
+    defaultTempo  String?
+    mediaUrl      String?
+
+    tags                   ExerciseTag[]
+    blockExercises         BlockExercise[]
+    templateBlockExercises TemplateBlockExercise[]
+}
+
+model Tag {
+    id        Int           @id @default(autoincrement())
+    name      String        @unique
+    exercises ExerciseTag[]
+}
+
+model ExerciseTag {
+    exerciseId Int
+    tagId      Int
+
+    exercise Exercise @relation(fields: [exerciseId], references: [id], onDelete: Cascade)
+    tag      Tag      @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+    @@id([exerciseId, tagId])
+}
+
+model ProgressionType {
+    id          Int     @id @default(autoincrement())
+    coachId     String
+    coach       Coach   @relation(fields: [coachId], references: [userId], onDelete: Cascade)
+    name        String
+    colorHex    String
+    description String?
+    isActive    Boolean @default(true)
+
+    blockExercises         BlockExercise[]
+    templateBlockExercises TemplateBlockExercise[]
+
+    @@unique([coachId, name])
+    @@unique([coachId, colorHex])
+}
+
+/**
+ * ===========================
+ * PLANS (assigned to clients)
+ * ===========================
+ */
+
+model Plan {
+    id                  Int            @id @default(autoincrement())
+    clientId            String
+    coachId             String
+    planNumberPerClient Int
+    title               String
+    dateStart           DateTime
+    dateEnd             DateTime
+    monthlyGoal         String?
+    status              PlanStatus     @default(draft)
+    visibility          PlanVisibility @default(private)
+    notes               String?
+    createdBy           String
+    createdAt           DateTime       @default(now())
+    updatedAt           DateTime       @updatedAt
+
+    client Client    @relation(fields: [clientId], references: [userId])
+    coach  Coach     @relation(fields: [coachId], references: [userId])
+    days   PlanDay[]
+}
+
+model PlanDay {
+    id         Int      @id @default(autoincrement())
+    planId     Int
+    dayIndex   Int
+    warmupText String?
+    notes      String?
+    createdAt  DateTime @default(now())
+    updatedAt  DateTime @updatedAt
+
+    plan     Plan             @relation(fields: [planId], references: [id], onDelete: Cascade)
+    sections PlanDaySection[]
+
+    @@unique([planId, dayIndex])
+}
+
+model PlanDaySection {
+    id                  Int      @id @default(autoincrement())
+    planDayId           Int
+    sectionId           Int
+    sectionNameSnapshot String
+    sortOrder           Int      @default(0)
+    createdAt           DateTime @default(now())
+    updatedAt           DateTime @updatedAt
+
+    planDay PlanDay @relation(fields: [planDayId], references: [id], onDelete: Cascade)
+    section Section @relation(fields: [sectionId], references: [id])
+
+    blocks Block[]
+
+    @@unique([planDayId, sortOrder])
+}
+
+model Block {
+    id               Int       @id @default(autoincrement())
+    planDaySectionId Int
+    blockType        BlockType
+    macroRestS       Int?
+    notes            String?
+    sortOrder        Int       @default(0)
+    createdAt        DateTime  @default(now())
+    updatedAt        DateTime  @updatedAt
+
+    planDaySection PlanDaySection  @relation(fields: [planDaySectionId], references: [id], onDelete: Cascade)
+    exercises      BlockExercise[]
+
+    @@unique([planDaySectionId, sortOrder])
+}
+
+model BlockExercise {
+    id                Int      @id @default(autoincrement())
+    blockId           Int
+    exerciseId        Int
+    progressionTypeId Int?
+    sortOrder         Int      @default(0)
+    microRestS        Int?
+    tempoOverride     String?
+    notes             String?
+    createdAt         DateTime @default(now())
+    updatedAt         DateTime @updatedAt
+
+    block           Block            @relation(fields: [blockId], references: [id], onDelete: Cascade)
+    exercise        Exercise         @relation(fields: [exerciseId], references: [id])
+    progressionType ProgressionType? @relation(fields: [progressionTypeId], references: [id])
+
+    microcycles Microcycle[]
+
+    @@unique([blockId, sortOrder])
+}
+
+model Microcycle {
+    id              Int      @id @default(autoincrement())
+    blockExerciseId Int
+    microIndex      Int
+    sets            Int
+    reps            String
+    rir             String?
+    load            String?
+    restS           Int?
+    tempo           String?
+    createdAt       DateTime @default(now())
+    updatedAt       DateTime @updatedAt
+
+    blockExercise BlockExercise @relation(fields: [blockExerciseId], references: [id], onDelete: Cascade)
+
+    @@unique([blockExerciseId, microIndex])
+}
+
+/**
+ * ===========================
+ * PLAN TEMPLATES (base plans)
+ * ===========================
+ */
+
+model PlanTemplate {
+    id          Int            @id @default(autoincrement())
+    coachId     String
+    title       String
+    monthlyGoal String?
+    notes       String?
+    status      PlanStatus     @default(draft)
+    visibility  PlanVisibility @default(private)
+    createdBy   String
+    createdAt   DateTime       @default(now())
+    updatedAt   DateTime       @updatedAt
+
+    coach Coach         @relation(fields: [coachId], references: [userId], onDelete: Cascade)
+    days  TemplateDay[]
+}
+
+model TemplateDay {
+    id         Int      @id @default(autoincrement())
+    templateId Int
+    dayIndex   Int
+    warmupText String?
+    notes      String?
+    createdAt  DateTime @default(now())
+    updatedAt  DateTime @updatedAt
+
+    template PlanTemplate         @relation(fields: [templateId], references: [id], onDelete: Cascade)
+    sections TemplateDaySection[]
+
+    @@unique([templateId, dayIndex])
+}
+
+model TemplateDaySection {
+    id                  Int      @id @default(autoincrement())
+    templateDayId       Int
+    sectionId           Int
+    sectionNameSnapshot String
+    sortOrder           Int      @default(0)
+    createdAt           DateTime @default(now())
+    updatedAt           DateTime @updatedAt
+
+    templateDay TemplateDay @relation(fields: [templateDayId], references: [id], onDelete: Cascade)
+    section     Section     @relation(fields: [sectionId], references: [id])
+
+    blocks TemplateBlock[]
+
+    @@unique([templateDayId, sortOrder])
+}
+
+model TemplateBlock {
+    id                   Int       @id @default(autoincrement())
+    templateDaySectionId Int
+    blockType            BlockType
+    macroRestS           Int?
+    notes                String?
+    sortOrder            Int       @default(0)
+    createdAt            DateTime  @default(now())
+    updatedAt            DateTime  @updatedAt
+
+    templateDaySection TemplateDaySection      @relation(fields: [templateDaySectionId], references: [id], onDelete: Cascade)
+    exercises          TemplateBlockExercise[]
+
+    @@unique([templateDaySectionId, sortOrder])
+}
+
+model TemplateBlockExercise {
+    id                Int      @id @default(autoincrement())
+    templateBlockId   Int
+    exerciseId        Int
+    progressionTypeId Int?
+    sortOrder         Int      @default(0)
+    microRestS        Int?
+    tempoOverride     String?
+    notes             String?
+    createdAt         DateTime @default(now())
+    updatedAt         DateTime @updatedAt
+
+    templateBlock   TemplateBlock    @relation(fields: [templateBlockId], references: [id], onDelete: Cascade)
+    exercise        Exercise         @relation(fields: [exerciseId], references: [id])
+    progressionType ProgressionType? @relation(fields: [progressionTypeId], references: [id])
+
+    microcycles TemplateMicrocycle[]
+
+    @@unique([templateBlockId, sortOrder])
+}
+
+model TemplateMicrocycle {
+    id                      Int      @id @default(autoincrement())
+    templateBlockExerciseId Int
+    microIndex              Int
+    sets                    Int
+    reps                    String
+    rir                     String?
+    load                    String?
+    restS                   Int?
+    tempo                   String?
+    createdAt               DateTime @default(now())
+    updatedAt               DateTime @updatedAt
+
+    templateBlockExercise TemplateBlockExercise @relation(fields: [templateBlockExerciseId], references: [id], onDelete: Cascade)
+
+    @@unique([templateBlockExerciseId, microIndex])
+}
+
+/**
+ * ===========================
+ * ENUMS
+ * ===========================
+ */
+
+enum MmAxis {
+    MMSS
+    MMII
+    Mixto
+}
+
+enum BlockType {
+    series
+    superset
+    triset
+    circuit
+}
+
+enum PlanStatus {
+    draft
+    published
+    archived
+}
+
+enum PlanVisibility {
+    private
+    shared
+    public
+}
